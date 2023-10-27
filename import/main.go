@@ -1,103 +1,80 @@
 package main
 
-// Import emoji data from Emojipedia.org
-// Useful for rebuilding the emoji data found in the `data/emoji.json` file
-
 import (
-	"encoding/json"
+	"bufio"
 	"fmt"
-	"io/ioutil"
+	"log"
 	"net/http"
-
-	"github.com/pbennett/Go-Emoji-Utils/utils"
-
-	"github.com/pbennett/Go-Emoji-Utils"
-
-	"github.com/PuerkitoBio/goquery"
+	"os"
+	"regexp"
+	"strings"
 )
 
-type lookup struct {
-	Name string
-	URL  string
-}
+// This helper program grabs the text description of the Unicode 15.1 character set, grabbing all fully-qualified emojis
+// and replacing the Go-Emoji-Utils emojidata.go file for update.
+
+// example lines to parse
+// 1F600         ; fully-qualified     # 😀 E1.0 grinning face
+// 1F170 FE0F    ; fully-qualified     # 🅰️ E0.6 A button (blood type)
+// 1F9D6 1F3FC 200D 2642 FE0F   ; fully-qualified     # 🧖🏼‍♂️ E5.0 man in steamy room: medium-light skin tone
+var unicodeRegex = regexp.MustCompile(`(?P<bytes>( ?[0-9A-F]{2,5})+).+fully-qualified.+# (?P<emoji>[^ ]+) E\d+\.\d+ (?P<title>.+)$`)
 
 func main() {
-	fmt.Println("Updating Emoji Definition using Emojipedia…")
-
-	// Grab the latest Apple Emoji Definitions
-	res, err := http.Get("https://emojipedia.org/apple/")
+	resp, err := http.Get("https://unicode.org/Public/emoji/15.1/emoji-test.txt")
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
+	}
+	defer resp.Body.Close()
+	goMapFile, err := os.Create("emojidata.go")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer goMapFile.Close()
+	jsonFile, err := os.Create("data/emoji.json")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer jsonFile.Close()
+
+	goMapFile.WriteString(`package emoji
+
+// Emojis - Map of Emoji Runes as Hex keys to their description
+var Emojis = map[string]Emoji{
+`)
+	jsonFile.WriteString("{\n")
+
+	scanner := bufio.NewScanner(resp.Body)
+
+	var i int
+	for scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			log.Fatal(err)
+		}
+		line := scanner.Text()
+		matches := unicodeRegex.FindStringSubmatch(line)
+		if matches == nil {
+			continue
+		}
+		byteVals := matches[unicodeRegex.SubexpIndex("bytes")]
+		keyPart := strings.Join(strings.Split(byteVals, " "), "-")
+
+		goMapFile.WriteString(fmt.Sprintf(`	"%s": {
+		Key:        "%s",
+		Value:      "%s",
+		Descriptor: "%s",
+	},
+`, keyPart, keyPart, matches[unicodeRegex.SubexpIndex("emoji")], matches[unicodeRegex.SubexpIndex("title")]))
+		if i > 0 {
+			jsonFile.WriteString(",\n")
+		}
+		jsonFile.WriteString(fmt.Sprintf(`	"%s": {
+		"key":        "%s",
+		"value":      "%s",
+		"descriptor": "%s"
+	}`, keyPart, keyPart, matches[unicodeRegex.SubexpIndex("emoji")], matches[unicodeRegex.SubexpIndex("title")]))
+		i++
 	}
 
-	defer res.Body.Close()
-
-	// Load the Apple Emoji HTML page into goquery so that we
-	// can query the DOM
-	doc, docErr := goquery.NewDocumentFromReader(res.Body)
-	if docErr != nil {
-		panic(docErr)
-	}
-
-	// Create a channel for lookups so that we can do this async
-	lookups := make(chan lookup)
-
-	go func() {
-		// Find all emojis on the page
-		doc.Find("ul.emoji-grid li").Each(func(i int, s *goquery.Selection) {
-			// For each item found, get the band and title
-			emojiPage, _ := s.Find("a").Attr("href")
-			title, _ := s.Find("img").Attr("title")
-
-			fmt.Printf("Adding Emoji %d to lookups: %s - %s\n", i, title, emojiPage)
-
-			// Add this specific emoji to the lookups to complete
-			lookups <- lookup{
-				Name: title,
-				URL:  "https://emojipedia.org" + emojiPage,
-			}
-		})
-
-		close(lookups)
-	}()
-
-	emojis := map[string]emoji.Emoji{}
-
-	// Process a lookup
-	for lookup := range lookups {
-		fmt.Println("Looking up " + lookup.Name)
-
-		// Grab the emojipedia page for this emoji
-		res, err := http.Get(lookup.URL)
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-
-		// Create a new goquery reader
-		doc, docErr := goquery.NewDocumentFromReader(res.Body)
-		if docErr != nil {
-			panic(docErr)
-		}
-
-		// Grab the emoji from the "Copy emoji" input field on the HTML page
-		emojiString, _ := doc.Find(".copy-paste input[type=text]").Attr("value")
-
-		// Convert the raw Emoji value to our hex key
-		hexString := utils.StringToHexKey(emojiString)
-
-		// Add this emoji to our map
-		emojis[hexString] = emoji.Emoji{
-			Key:        hexString,
-			Value:      emojiString,
-			Descriptor: lookup.Name,
-		}
-
-		// Print our progress to the console
-		fmt.Println(emojis[hexString])
-	}
-
-	// Marshal the emojis map as JSON and write to the data directory
-	s, _ := json.MarshalIndent(emojis, "", "\t")
-	ioutil.WriteFile("data/emoji.json", []byte(s), 0644)
+	goMapFile.WriteString("}\n")
+	jsonFile.WriteString("\n}\n")
 }

@@ -9,7 +9,7 @@ A collection of useful functions for working with emoji. For example: look up th
  - [x] Look up the definition of a single emoji
  - [x] Look up the definitions for a list of emojis
  - [x] Remove all emoji from a string
- - [x] Import tool to update Emoji data with [Emojipedia](http://emojipedia.org/) specs
+ - [x] Import tool to update Emoji data from [Unicode.org](https://unicode.org/Public/emoji/15.1/emoji-test.txt) specs
  - [x] Find the location of and occurrences of a specific emoji in a string
 
 ## Examples
@@ -76,4 +76,4 @@ output := emoji.RemoveAll(input)
 ```
 
 ### Updating the Emoji definitions data file
-Definitions of each emoji can be found in the `data/emoji.json` file. This JSON file is unmarshalled into a map at runtime with the emoji's hex representation as it's key. You can update the definitions file using definitions from [Emojipedia](http://emojipedia.org/) with the `import` program bundled with this package. You can find it at `import/main.go`.
+Definitions of each emoji can be found in the `data/emoji.json` file. This JSON file is unmarshalled into a map at runtime with the emoji's hex representation as it's key. You can update the definitions file `import` program bundled with this package. You can find it at `import/main.go`.  It updates emoji.json (if you want to use this), as well as emojidata.go which is compiled into the package.
